@@ -1,6 +1,7 @@
 "use client";
 
 import { MessageCircle, Plus } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import { Server } from "@/lib/types";
 import { Tooltip } from "./Tooltip";
 
@@ -15,12 +16,34 @@ export default function ServerRail({
   onSelect: (id: string) => void;
   onAddServer: () => void;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const homeActive = pathname === "/friends";
+
   return (
     <nav className="flex h-full w-[72px] flex-col items-center gap-2 bg-d-darkest py-3">
       <Tooltip label="Home" side="right">
-        <div className="grid h-12 w-12 cursor-pointer place-items-center rounded-2xl bg-blurple text-white transition-all hover:rounded-xl">
-          <MessageCircle size={26} strokeWidth={2.2} />
-        </div>
+        <button
+          onClick={() => router.push("/friends")}
+          className="group relative flex items-center justify-center"
+          aria-label="Home"
+          aria-current={homeActive ? "page" : undefined}
+        >
+          <span
+            className={`absolute -left-3 w-1 rounded-r-full bg-white transition-all ${
+              homeActive ? "h-10" : "h-0 group-hover:h-5"
+            }`}
+          />
+          <span
+            className={`grid h-12 w-12 place-items-center text-white transition-all ${
+              homeActive
+                ? "rounded-xl bg-blurple"
+                : "rounded-3xl bg-d-dark text-d-text group-hover:rounded-xl group-hover:bg-blurple group-hover:text-white"
+            }`}
+          >
+            <MessageCircle size={26} strokeWidth={2.2} />
+          </span>
+        </button>
       </Tooltip>
       <div className="my-1 h-0.5 w-8 rounded bg-d-dark" />
 

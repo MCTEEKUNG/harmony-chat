@@ -86,3 +86,24 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Voice "speaking" indicator — a steady 2px green ring plus a soft pulsing
+   halo around an avatar while talking. Used by Avatar's speaking-ring overlay.
+   The first shadow layer is the constant ring; the second is the pulse so the
+   ring stays visible even mid-animation. No layout shift (box-shadow only). */
+@keyframes speakRing {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px var(--color-online),
+      0 0 0 0 rgba(35, 165, 90, 0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px var(--color-online),
+      0 0 0 4px rgba(35, 165, 90, 0);
+  }
+}
+.animate-speak-ring {
+  animation: speakRing 1.4s var(--ease-out-quint) infinite;
+}

@@ -77,12 +77,14 @@ export function Avatar({
   size = 40,
   status,
   ring = "ring-d-dark",
+  speaking = false,
 }: {
   src?: string | null;
   alt: string;
   size?: number;
   status?: UserStatus | null;
   ring?: string;
+  speaking?: boolean;
 }) {
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
@@ -92,6 +94,14 @@ export function Avatar({
         alt={alt}
         className="h-full w-full rounded-full bg-d-darkest object-cover"
       />
+      {/* Animated green speaking ring — overlay sibling so there's no layout
+          shift (ring-2 is box-shadow; absolute inset keeps the img untouched). */}
+      {speaking && (
+        <span
+          aria-hidden
+          className="animate-speak-ring pointer-events-none absolute inset-0 rounded-full ring-2 ring-online"
+        />
+      )}
       {status && (
         <StatusDot
           status={status}

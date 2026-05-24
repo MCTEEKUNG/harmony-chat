@@ -16,6 +16,7 @@ import { Channel, Member, Profile, Server } from "@/lib/types";
 import { Avatar, statusLabel } from "./Avatar";
 import { Tooltip } from "./Tooltip";
 import VoiceConnection from "./VoiceConnection";
+import { useSpeaking } from "@/lib/voiceState";
 
 export default function ChannelSidebar({
   server,
@@ -131,21 +132,11 @@ export default function ChannelSidebar({
                 {parts.length > 0 && (
                   <ul className="ml-5 mt-0.5 space-y-0.5">
                     {parts.map((p) => (
-                      <li
+                      <VoiceParticipantRow
                         key={p.user_id}
-                        onContextMenu={(e) => onUserContextMenu?.(p.user_id, e)}
-                        className="flex cursor-context-menu items-center gap-2 rounded px-2 py-1 hover:bg-d-hover"
-                      >
-                        <Avatar
-                          src={p.profile?.avatar_url}
-                          alt={p.profile?.display_name ?? "User"}
-                          size={20}
-                        />
-                        <span className="truncate text-xs text-d-text">
-                          {p.profile?.display_name}
-                        </span>
-                        <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-online" />
-                      </li>
+                        participant={p}
+                        onUserContextMenu={onUserContextMenu}
+                      />
                     ))}
                   </ul>
                 )}
@@ -207,6 +198,35 @@ export default function ChannelSidebar({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A single voice-channel participant row. A dedicated component so the
+ * per-user `useSpeaking` hook can be called once per row; the green dot is
+ * replaced by Avatar's animated speaking ring (only visible while talking).
+ */
+function VoiceParticipantRow({
+  participant: p,
+  onUserContextMenu,
+}: {
+  participant: Member;
+  onUserContextMenu?: (userId: string, e: React.MouseEvent) => void;
+}) {
+  const speaking = useSpeaking(p.user_id);
+  return (
+    <li
+      onContextMenu={(e) => onUserContextMenu?.(p.user_id, e)}
+      className="flex cursor-context-menu items-center gap-2 rounded px-2 py-1 hover:bg-d-hover"
+    >
+      <Avatar
+        src={p.profile?.avatar_url}
+        alt={p.profile?.display_name ?? "User"}
+        size={20}
+        speaking={speaking}
+      />
+      <span className="truncate text-xs text-d-text">{p.profile?.display_name}</span>
+    </li>
   );
 }
 

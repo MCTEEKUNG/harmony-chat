@@ -5,6 +5,11 @@ import { Video, VideoOff, ScreenShare, PhoneOff, Volume2 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { Channel, Profile } from "@/lib/types";
 import { Tooltip } from "./Tooltip";
+import { setSpeaking, clearSpeaking } from "@/lib/voiceState";
+
+// Speaking-detection tuning.
+const SPEAK_RMS_THRESHOLD = 0.02; // minimum normalized RMS to count as "talking"
+const SPEAK_HANGOVER_MS = 250; // keep "speaking" this long after volume drops
 
 const ICE: RTCConfiguration = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
@@ -36,6 +41,19 @@ export default function VoiceConnection({
   const peerNamesRef = useRef<Map<string, string>>(new Map());
   const chanRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
+  // Web Audio speaking detection: one AudioContext, one rAF loop, and a
+  // per-userId analyser. `lastAboveAt` gives a short hangover so the ring
+  // doesn't flicker between syllables.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analysersRef = useRef<
+    Map<
+      string,
+      { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; data: Uint8Array<ArrayBuffer> }
+    >
+  >(new Map());
+  const lastAboveRef = useRef<Map<string, number>>(new Map());
+  const rafRef = useRef<number | null>(null);
+
   const [connected, setConnected] = useState(false);
   const [camOn, setCamOn] = useState(false);
   const [screenOn, setScreenOn] = useState(false);
@@ -48,6 +66,45 @@ export default function VoiceConnection({
     const myId = me.id;
     const channelId = channel.id;
 
+    const analysers = analysersRef.current;
+    const lastAbove = lastAboveRef.current;
+
+    // Attach an AnalyserNode for a stream, keyed by the userId it represents.
+    // No-op if there's no AudioContext, no audio tracks, or it's already wired.
+    function attachAnalyser(userId: string, stream: MediaStream) {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      if (analysers.has(userId)) return;
+      if (stream.getAudioTracks().length === 0) return; // createMediaStreamSource throws otherwise
+      try {
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.4;
+        source.connect(analyser); // source → analyser ONLY (never to destination)
+        const data = new Uint8Array(new ArrayBuffer(analyser.fftSize));
+        analysers.set(userId, { source, analyser, data });
+      } catch (err) {
+        console.error("analyser attach error", err);
+      }
+    }
+
+    // Detach + clear speaking state for a userId.
+    function detachAnalyser(userId: string) {
+      const node = analysers.get(userId);
+      if (node) {
+        try {
+          node.source.disconnect();
+          node.analyser.disconnect();
+        } catch {
+          /* already disconnected */
+        }
+        analysers.delete(userId);
+      }
+      lastAbove.delete(userId);
+      setSpeaking(userId, false);
+    }
+
     function removePeer(peerId: string) {
       const pc = pcs.get(peerId);
       if (pc) {
@@ -57,6 +114,7 @@ export default function VoiceConnection({
         pc.close();
       }
       pcs.delete(peerId);
+      detachAnalyser(peerId);
       setRemotes((prev) => {
         if (!(peerId in prev)) return prev;
         const next = { ...prev };
@@ -81,6 +139,37 @@ export default function VoiceConnection({
       if (cancelled) return;
       setConnected(true);
 
+      // 1b. speaking detection — one AudioContext + rAF loop for everyone.
+      const AC: typeof AudioContext | undefined =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AC) {
+        const ctx = new AC();
+        audioCtxRef.current = ctx;
+        ctx.resume().catch(() => {}); // may start suspended; the mic gesture allows resume
+        // local mic → me.id (guarded for the empty-stream mic-failure case)
+        attachAnalyser(myId, localStreamRef.current!);
+
+        const tick = () => {
+          const now = performance.now();
+          analysers.forEach(({ analyser, data }, userId) => {
+            analyser.getByteTimeDomainData(data);
+            // RMS of the waveform centered at 128 → 0..1
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) {
+              const v = (data[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / data.length);
+            if (rms > SPEAK_RMS_THRESHOLD) lastAbove.set(userId, now);
+            const above = lastAbove.get(userId);
+            setSpeaking(userId, above != null && now - above < SPEAK_HANGOVER_MS);
+          });
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        rafRef.current = requestAnimationFrame(tick);
+      }
+
       // 2. signaling channel
       const chan = supabase.channel(`rtc:${channelId}`, {
         config: { presence: { key: myId } },
@@ -102,6 +191,7 @@ export default function VoiceConnection({
         pc.ontrack = (e) => {
           const stream = e.streams[0];
           if (!stream) return;
+          attachAnalyser(peerId, stream); // remote stream → its peerId
           setRemotes((prev) => ({
             ...prev,
             [peerId]: { name: peerNamesRef.current.get(peerId) ?? "User", stream },
@@ -178,6 +268,27 @@ export default function VoiceConnection({
 
     return () => {
       cancelled = true;
+      // stop speaking detection: rAF → analyser/source nodes → AudioContext → store
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      analysers.forEach(({ source, analyser }) => {
+        try {
+          source.disconnect();
+          analyser.disconnect();
+        } catch {
+          /* already disconnected */
+        }
+      });
+      analysers.clear();
+      lastAbove.clear();
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {}); // don't await
+        audioCtxRef.current = null;
+      }
+      clearSpeaking();
+
       pcs.forEach((pc) => {
         pc.onicecandidate = null;
         pc.ontrack = null;

@@ -19,6 +19,17 @@ export async function getMyServers(userId: string): Promise<Server[]> {
   return servers.sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
+/** All other users, treated as "friends" for the Friends/Home page. */
+export async function getOtherProfiles(meId: string): Promise<Profile[]> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .neq("id", meId)
+    .order("display_name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Profile[];
+}
+
 export async function getMutualServers(meId: string, userId: string): Promise<Server[]> {
   const [{ data: mine }, { data: theirs }] = await Promise.all([
     supabase.from("server_members").select("server_id").eq("user_id", meId),

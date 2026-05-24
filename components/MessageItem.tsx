@@ -18,6 +18,28 @@ function fmtShort(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+const IMAGE_EXT_RE = /\.(gif|png|jpe?g|webp|svg)$/i;
+const MEDIA_HOSTS = ["picsum.photos", "api.dicebear.com"];
+
+// Returns the trimmed URL if `content` is a single bare http(s) image/media URL,
+// otherwise null (so the message renders as text).
+function mediaUrl(content: string): string | null {
+  const trimmed = content.trim();
+  // Must be a single token (no whitespace) so normal text with a link stays text.
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  const host = parsed.hostname.toLowerCase();
+  if (MEDIA_HOSTS.includes(host)) return trimmed;
+  if (IMAGE_EXT_RE.test(parsed.pathname)) return trimmed;
+  return null;
+}
+
 export default function MessageItem({
   message,
   isMine,
@@ -38,6 +60,7 @@ export default function MessageItem({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const name = message.profile?.display_name ?? "Unknown";
+  const media = mediaUrl(message.content);
 
   function save() {
     const v = draft.trim();
@@ -102,6 +125,21 @@ export default function MessageItem({
                 save
               </button>
             </p>
+          </div>
+        ) : media ? (
+          <div className="mt-1">
+            <a href={media} target="_blank" rel="noopener noreferrer" className="inline-block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={media}
+                alt="attachment"
+                loading="lazy"
+                className="max-h-80 max-w-xs rounded-lg object-contain"
+              />
+            </a>
+            {message.edited_at && (
+              <span className="ml-1 text-[10px] text-d-muted">(edited)</span>
+            )}
           </div>
         ) : (
           <p className="whitespace-pre-wrap break-words text-d-text">

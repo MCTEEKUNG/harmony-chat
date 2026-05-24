@@ -1,10 +1,11 @@
 "use client";
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Hash, Menu, Search, Smile, Users, X } from "lucide-react";
+import { Film, Hash, Menu, Search, Smile, Sticker, Users, X } from "lucide-react";
 import { Channel, Message, Profile } from "@/lib/types";
 import { searchMessages } from "@/lib/queries";
 import MessageItem from "./MessageItem";
+import GifStickerPicker from "./GifStickerPicker";
 import { Avatar } from "./Avatar";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -67,6 +68,7 @@ export default function ChatArea({
   const prependRef = useRef(false);
   const [draft, setDraft] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [pickerTab, setPickerTab] = useState<"gif" | "stickers" | null>(null);
 
   // search
   const [searchTerm, setSearchTerm] = useState("");
@@ -317,7 +319,56 @@ export default function ChatArea({
           <div className="relative">
             <button
               type="button"
-              onClick={() => setEmojiOpen((v) => !v)}
+              onClick={() => {
+                setPickerTab((t) => (t === "gif" ? null : "gif"));
+                setEmojiOpen(false);
+              }}
+              title="GIF"
+              className={`grid h-8 w-8 place-items-center rounded transition-colors hover:text-d-text ${
+                pickerTab === "gif" ? "text-d-text" : "text-d-muted"
+              }`}
+            >
+              <Film size={22} />
+            </button>
+            {pickerTab === "gif" && (
+              <GifStickerPicker
+                initialTab="gif"
+                onSelect={(url) => onSend(url)}
+                onClose={() => setPickerTab(null)}
+              />
+            )}
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setPickerTab((t) => (t === "stickers" ? null : "stickers"));
+                setEmojiOpen(false);
+              }}
+              title="Sticker"
+              className={`grid h-8 w-8 place-items-center rounded transition-colors hover:text-d-text ${
+                pickerTab === "stickers" ? "text-d-text" : "text-d-muted"
+              }`}
+            >
+              <Sticker size={22} />
+            </button>
+            {pickerTab === "stickers" && (
+              <GifStickerPicker
+                initialTab="stickers"
+                onSelect={(url) => onSend(url)}
+                onClose={() => setPickerTab(null)}
+              />
+            )}
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setEmojiOpen((v) => !v);
+                setPickerTab(null);
+              }}
               title="Emoji"
               className="grid h-8 w-8 place-items-center rounded text-d-muted transition-colors hover:text-d-text"
             >
