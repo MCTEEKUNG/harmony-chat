@@ -12,6 +12,9 @@ import ChatArea from "@/components/ChatArea";
 import MemberList from "@/components/MemberList";
 import JoinServerModal from "@/components/JoinServerModal";
 import ProfileCard from "@/components/ProfileCard";
+import UserSettings from "@/components/UserSettings";
+import { ContextMenu } from "@/components/ContextMenu";
+import { UserRound, Copy } from "lucide-react";
 
 export default function AppPage() {
   const router = useRouter();
@@ -33,9 +36,11 @@ export default function AppPage() {
   const [activeVoiceChannelId, setActiveVoiceChannelId] = useState<string | null>(null);
 
   const [showJoin, setShowJoin] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [userMenu, setUserMenu] = useState<{ x: number; y: number; userId: string } | null>(null);
   const [toasts, setToasts] = useState<{ id: number; type: "success" | "error"; msg: string }[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<string, { name: string; t: number }>>({});
   const typingChanRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -307,6 +312,11 @@ export default function AppPage() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
   }, []);
 
+  const openUserMenu = useCallback((userId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    setUserMenu({ x: e.clientX, y: e.clientY, userId });
+  }, []);
+
   const handleLoadMore = useCallback(async () => {
     if (!activeChannelId || messages.length === 0 || loadingMore) return;
     setLoadingMore(true);
@@ -373,12 +383,13 @@ export default function AppPage() {
             setMobileNav(false);
           }}
           me={me}
-          onOpenSettings={() => router.push("/settings")}
+          onOpenSettings={() => setShowSettings(true)}
           activeVoiceChannelId={activeVoiceChannelId}
           voiceParticipants={voiceParticipants}
           onJoinVoice={handleJoinVoice}
           voiceChannel={activeVoiceChannel}
           onLeaveVoice={handleLeaveVoice}
+          onUserContextMenu={openUserMenu}
         />
       </div>
       {mobileNav && (
@@ -412,6 +423,7 @@ export default function AppPage() {
             members={liveMembers}
             className="hidden lg:flex"
             onShowProfile={setProfileUserId}
+            onUserContextMenu={openUserMenu}
           />
       </div>
 
@@ -429,6 +441,7 @@ export default function AppPage() {
               setMembersOpen(false);
               setProfileUserId(id);
             }}
+            onUserContextMenu={openUserMenu}
           />
         </div>
       )}
@@ -446,6 +459,15 @@ export default function AppPage() {
         />
       )}
 
+      {showSettings && (
+        <UserSettings
+          me={me}
+          onClose={() => setShowSettings(false)}
+          onSaved={setMe}
+          onSignOut={handleSignOut}
+        />
+      )}
+
       {profileUserId && (
         <ProfileCard
           userId={profileUserId}
@@ -455,9 +477,36 @@ export default function AppPage() {
           onClose={() => setProfileUserId(null)}
           onEditProfile={() => {
             setProfileUserId(null);
-            router.push("/settings");
+            setShowSettings(true);
           }}
           onToast={notify}
+        />
+      )}
+
+      {userMenu && (
+        <ContextMenu
+          x={userMenu.x}
+          y={userMenu.y}
+          onClose={() => setUserMenu(null)}
+          items={[
+            {
+              label: "View Profile",
+              icon: <UserRound size={15} />,
+              onClick: () => setProfileUserId(userMenu.userId),
+            },
+            {
+              label: "Copy User ID",
+              icon: <Copy size={15} />,
+              onClick: async () => {
+                try {
+                  await navigator.clipboard.writeText(userMenu.userId);
+                  notify("Copied user ID");
+                } catch {
+                  notify("Couldn't copy.", "error");
+                }
+              },
+            },
+          ]}
         />
       )}
 

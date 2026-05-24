@@ -1,14 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PhoneOff, Video, VideoOff, ScreenShare } from "lucide-react";
+import { Video, VideoOff, ScreenShare, PhoneOff, Volume2 } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 import { Channel, Profile } from "@/lib/types";
 import { Tooltip } from "./Tooltip";
 
+const ICE: RTCConfiguration = {
+  iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
+};
+
 /**
- * Compact "Voice Connected" panel shown above the user panel (Discord places
- * the voice status bottom-left, not over the text chat). Mic/deafen live in the
- * user panel; this panel owns video, screen share and disconnect.
+ * Voice panel with a real WebRTC **audio** mesh so everyone in the same voice
+ * channel hears each other. Signaling rides a Supabase Realtime channel
+ * (presence for discovery + broadcast for offer/answer/ICE). Audio tracks are
+ * fixed for the connection's life (mute = track.enabled), so there is no
+ * renegotiation. Camera / screen are local self-preview for now.
  */
 export default function VoiceConnection({
   channel,
@@ -19,43 +26,175 @@ export default function VoiceConnection({
   me: Profile;
   onLeave: () => void;
 }) {
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const audioStreamRef = useRef<MediaStream | null>(null);
+  const meRef = useRef(me);
+  meRef.current = me;
+
+  const localStreamRef = useRef<MediaStream | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const peerNamesRef = useRef<Map<string, string>>(new Map());
+  const chanRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const [connected, setConnected] = useState(false);
   const [camOn, setCamOn] = useState(false);
   const [screenOn, setScreenOn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [remotes, setRemotes] = useState<Record<string, { name: string; stream: MediaStream }>>({});
 
   useEffect(() => {
-    let active = true;
-    setConnected(false);
-    setError(null);
-    navigator.mediaDevices
-      .getUserMedia({ audio: true, video: false })
-      .then((stream) => {
-        if (!active) {
+    let cancelled = false;
+    const pcs = pcsRef.current;
+    const myId = me.id;
+    const channelId = channel.id;
+
+    function removePeer(peerId: string) {
+      const pc = pcs.get(peerId);
+      if (pc) {
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.onconnectionstatechange = null;
+        pc.close();
+      }
+      pcs.delete(peerId);
+      setRemotes((prev) => {
+        if (!(peerId in prev)) return prev;
+        const next = { ...prev };
+        delete next[peerId];
+        return next;
+      });
+    }
+
+    async function start() {
+      // 1. microphone
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
-        audioStreamRef.current = stream;
-        setConnected(true);
-      })
-      .catch(() => {
-        if (active) {
-          setError("Mic unavailable — connected without input.");
-          setConnected(true);
+        localStreamRef.current = stream;
+      } catch {
+        if (!cancelled) setError("Mic unavailable — you can hear others but they can't hear you.");
+        localStreamRef.current = new MediaStream();
+      }
+      if (cancelled) return;
+      setConnected(true);
+
+      // 2. signaling channel
+      const chan = supabase.channel(`rtc:${channelId}`, {
+        config: { presence: { key: myId } },
+      });
+      chanRef.current = chan;
+
+      const send = (payload: Record<string, unknown>) =>
+        chan.send({ type: "broadcast", event: "signal", payload });
+
+      function createPeer(peerId: string) {
+        const existing = pcs.get(peerId);
+        if (existing) return existing;
+        const pc = new RTCPeerConnection(ICE);
+        pcs.set(peerId, pc);
+        localStreamRef.current?.getAudioTracks().forEach((t) => pc.addTrack(t, localStreamRef.current!));
+        pc.onicecandidate = (e) => {
+          if (e.candidate) send({ to: peerId, from: myId, ice: e.candidate.toJSON() });
+        };
+        pc.ontrack = (e) => {
+          const stream = e.streams[0];
+          if (!stream) return;
+          setRemotes((prev) => ({
+            ...prev,
+            [peerId]: { name: peerNamesRef.current.get(peerId) ?? "User", stream },
+          }));
+        };
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === "failed" || pc.connectionState === "closed") removePeer(peerId);
+        };
+        return pc;
+      }
+
+      async function callPeer(peerId: string) {
+        const pc = createPeer(peerId);
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          send({ to: peerId, from: myId, desc: pc.localDescription });
+        } catch (err) {
+          console.error("offer error", err);
+        }
+      }
+
+      chan.on("broadcast", { event: "signal" }, async ({ payload }) => {
+        const p = payload as {
+          to: string;
+          from: string;
+          desc?: RTCSessionDescriptionInit;
+          ice?: RTCIceCandidateInit;
+        };
+        if (p.to !== myId) return;
+        const peerId = p.from;
+        try {
+          if (p.desc) {
+            const pc = createPeer(peerId);
+            await pc.setRemoteDescription(p.desc);
+            if (p.desc.type === "offer") {
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              send({ to: peerId, from: myId, desc: pc.localDescription });
+            }
+          } else if (p.ice) {
+            const pc = pcs.get(peerId);
+            if (pc) await pc.addIceCandidate(p.ice).catch(() => {});
+          }
+        } catch (err) {
+          console.error("signal error", err);
         }
       });
+
+      chan.on("presence", { event: "sync" }, () => {
+        const state = chan.presenceState() as Record<string, { name?: string }[]>;
+        for (const [key, metas] of Object.entries(state)) {
+          peerNamesRef.current.set(key, metas[0]?.name ?? "User");
+        }
+        const others = Object.keys(state).filter((k) => k !== myId);
+        // deterministic initiator: the lexicographically smaller id calls
+        others.forEach((pid) => {
+          if (!pcs.has(pid) && myId < pid) callPeer(pid);
+        });
+        // drop peers who left
+        Array.from(pcs.keys()).forEach((pid) => {
+          if (!state[pid]) removePeer(pid);
+        });
+      });
+
+      chan.subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await chan.track({ name: meRef.current.display_name });
+        }
+      });
+    }
+
+    start();
+
     return () => {
-      active = false;
-      audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+      cancelled = true;
+      pcs.forEach((pc) => {
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.onconnectionstatechange = null;
+        pc.close();
+      });
+      pcs.clear();
+      peerNamesRef.current.clear();
+      if (chanRef.current) supabase.removeChannel(chanRef.current);
+      chanRef.current = null;
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
       videoStreamRef.current?.getTracks().forEach((t) => t.stop());
-      audioStreamRef.current = null;
       videoStreamRef.current = null;
+      setRemotes({});
     };
-  }, [channel.id]);
+  }, [channel.id, me.id]);
 
   async function stopVideo() {
     videoStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -93,11 +232,12 @@ export default function VoiceConnection({
       setScreenOn(true);
       setCamOn(false);
     } catch {
-      /* user cancelled the picker */
+      /* cancelled */
     }
   }
 
   const showVideo = camOn || screenOn;
+  const remoteList = Object.values(remotes);
 
   return (
     <div className="border-t border-black/40 bg-d-darkest/40 px-2 pb-2 pt-2">
@@ -110,7 +250,11 @@ export default function VoiceConnection({
             </span>
             {connected ? "Voice Connected" : "Connecting…"}
           </span>
-          <span className="block truncate text-xs text-d-muted">{channel.name}</span>
+          <span className="block truncate text-xs text-d-muted">
+            <Volume2 size={11} className="mr-1 inline" />
+            {channel.name}
+            {remoteList.length > 0 && ` · ${remoteList.length} connected`}
+          </span>
         </div>
         <Tooltip label="Disconnect" side="top">
           <button
@@ -124,37 +268,54 @@ export default function VoiceConnection({
 
       {error && <p className="px-1 pt-1 text-[11px] text-idle">{error}</p>}
 
+      {/* remote audio (the actual "interact") */}
+      {remoteList.map((r, i) => (
+        <audio
+          key={Object.keys(remotes)[i]}
+          autoPlay
+          ref={(el) => {
+            if (el && el.srcObject !== r.stream) el.srcObject = r.stream;
+          }}
+        />
+      ))}
+
+      {/* local self-preview */}
       <div className={`mt-2 overflow-hidden rounded-md bg-[#0b0b12] ${showVideo ? "" : "hidden"}`}>
         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video
-          ref={localVideoRef}
-          autoPlay
-          muted
-          playsInline
-          className="aspect-video w-full object-cover"
-        />
+        <video ref={localVideoRef} autoPlay muted playsInline className="aspect-video w-full object-cover" />
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-1.5">
-        <button
-          onClick={toggleCam}
-          className={`flex items-center justify-center gap-1.5 rounded py-1.5 text-xs font-medium transition ${
-            camOn ? "bg-d-active text-white" : "bg-d-dark text-d-muted hover:bg-d-hover hover:text-d-text"
-          }`}
-        >
-          {camOn ? <Video size={16} /> : <VideoOff size={16} />} Video
-        </button>
-        <button
-          onClick={toggleScreen}
-          className={`flex items-center justify-center gap-1.5 rounded py-1.5 text-xs font-medium transition ${
-            screenOn ? "bg-d-active text-white" : "bg-d-dark text-d-muted hover:bg-d-hover hover:text-d-text"
-          }`}
-        >
-          <ScreenShare size={16} /> Screen
-        </button>
+        <CtrlButton active={camOn} onClick={toggleCam} label="Camera">
+          {camOn ? <Video size={16} /> : <VideoOff size={16} />}
+        </CtrlButton>
+        <CtrlButton active={screenOn} onClick={toggleScreen} label="Screen">
+          <ScreenShare size={16} />
+        </CtrlButton>
       </div>
-
-      <span className="sr-only">Connected as {me.display_name}</span>
     </div>
+  );
+}
+
+function CtrlButton({
+  active,
+  onClick,
+  label,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center justify-center gap-1.5 rounded py-1.5 text-xs font-medium transition ${
+        active ? "bg-d-active text-white" : "bg-d-dark text-d-muted hover:bg-d-hover hover:text-d-text"
+      }`}
+    >
+      {children} {label}
+    </button>
   );
 }

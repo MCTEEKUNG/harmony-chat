@@ -29,6 +29,7 @@ export default function ChannelSidebar({
   onJoinVoice,
   voiceChannel,
   onLeaveVoice,
+  onUserContextMenu,
 }: {
   server: Server | null;
   channels: Channel[];
@@ -41,6 +42,7 @@ export default function ChannelSidebar({
   onJoinVoice: (channel: Channel) => void;
   voiceChannel: Channel | null;
   onLeaveVoice: () => void;
+  onUserContextMenu?: (userId: string, e: React.MouseEvent) => void;
 }) {
   const textChannels = channels.filter((c) => c.type === "text");
   const voiceChannels = channels.filter((c) => c.type === "voice");
@@ -129,7 +131,11 @@ export default function ChannelSidebar({
                 {parts.length > 0 && (
                   <ul className="ml-5 mt-0.5 space-y-0.5">
                     {parts.map((p) => (
-                      <li key={p.user_id} className="flex items-center gap-2 px-2 py-1">
+                      <li
+                        key={p.user_id}
+                        onContextMenu={(e) => onUserContextMenu?.(p.user_id, e)}
+                        className="flex cursor-context-menu items-center gap-2 rounded px-2 py-1 hover:bg-d-hover"
+                      >
                         <Avatar
                           src={p.profile?.avatar_url}
                           alt={p.profile?.display_name ?? "User"}

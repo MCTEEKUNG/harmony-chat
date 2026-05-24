@@ -8,10 +8,12 @@ export default function MemberList({
   members,
   className = "",
   onShowProfile,
+  onUserContextMenu,
 }: {
   members: Member[];
   className?: string;
   onShowProfile?: (userId: string) => void;
+  onUserContextMenu?: (userId: string, e: React.MouseEvent) => void;
 }) {
   const online = members.filter((m) => m.profile && m.profile.status !== "offline");
   const offline = members.filter((m) => !m.profile || m.profile.status === "offline");
@@ -19,8 +21,8 @@ export default function MemberList({
   return (
     <aside className={`w-60 shrink-0 flex-col bg-d-dark ${className}`}>
       <div className="d-scroll flex-1 overflow-y-auto px-4 py-4">
-        <Section title="Online" count={online.length} members={online} onShowProfile={onShowProfile} />
-        <Section title="Offline" count={offline.length} members={offline} dim onShowProfile={onShowProfile} />
+        <Section title="Online" count={online.length} members={online} onShowProfile={onShowProfile} onUserContextMenu={onUserContextMenu} />
+        <Section title="Offline" count={offline.length} members={offline} dim onShowProfile={onShowProfile} onUserContextMenu={onUserContextMenu} />
       </div>
     </aside>
   );
@@ -32,12 +34,14 @@ function Section({
   members,
   dim,
   onShowProfile,
+  onUserContextMenu,
 }: {
   title: string;
   count: number;
   members: Member[];
   dim?: boolean;
   onShowProfile?: (userId: string) => void;
+  onUserContextMenu?: (userId: string, e: React.MouseEvent) => void;
 }) {
   if (count === 0) return null;
   return (
@@ -50,6 +54,7 @@ function Section({
           <li
             key={m.user_id}
             onClick={() => onShowProfile?.(m.user_id)}
+            onContextMenu={(e) => onUserContextMenu?.(m.user_id, e)}
             className={`flex cursor-pointer items-center gap-3 rounded px-2 py-1.5 hover:bg-d-hover ${
               dim ? "opacity-40 hover:opacity-100" : ""
             }`}
