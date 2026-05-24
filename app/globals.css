@@ -1,26 +1,88 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-d-darkest: #1e1f22;
+  --color-d-dark: #2b2d31;
+  --color-d-mid: #313338;
+  --color-d-chat: #313338;
+  --color-d-hover: #35373c;
+  --color-d-active: #404249;
+  --color-d-text: #dbdee1;
+  --color-d-muted: #949ba4;
+  --color-d-bright: #f2f3f5;
+  --color-blurple: #5865f2;
+  --color-blurple-hover: #4752c4;
+  --color-online: #23a55a;
+  --color-idle: #f0b232;
+  --color-dnd: #f23f43;
+  --color-offline: #80848e;
+
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-d-mid);
+  color: var(--color-d-text);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+/* Discord-like thin scrollbar */
+.d-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #1a1b1e transparent;
+}
+.d-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.d-scroll::-webkit-scrollbar-thumb {
+  background-color: #1a1b1e;
+  border-radius: 4px;
+}
+.d-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root {
+  /* Natural deceleration — no bounce/elastic (impeccable motion law) */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-fade-in {
+  animation: fadeIn 0.18s var(--ease-out-quint);
+}
+
+/* Visible keyboard focus everywhere (accessibility) */
+:focus-visible {
+  outline: 2px solid var(--color-blurple);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Respect users who prefer less motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
