@@ -11,7 +11,6 @@ import ChannelSidebar from "@/components/ChannelSidebar";
 import ChatArea from "@/components/ChatArea";
 import MemberList from "@/components/MemberList";
 import JoinServerModal from "@/components/JoinServerModal";
-import UserSettingsModal from "@/components/UserSettingsModal";
 import ProfileCard from "@/components/ProfileCard";
 
 export default function AppPage() {
@@ -34,7 +33,6 @@ export default function AppPage() {
   const [activeVoiceChannelId, setActiveVoiceChannelId] = useState<string | null>(null);
 
   const [showJoin, setShowJoin] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
@@ -375,7 +373,7 @@ export default function AppPage() {
             setMobileNav(false);
           }}
           me={me}
-          onOpenSettings={() => setShowSettings(true)}
+          onOpenSettings={() => router.push("/settings")}
           activeVoiceChannelId={activeVoiceChannelId}
           voiceParticipants={voiceParticipants}
           onJoinVoice={handleJoinVoice}
@@ -448,19 +446,6 @@ export default function AppPage() {
         />
       )}
 
-      {showSettings && (
-        <UserSettingsModal
-          me={me}
-          onClose={() => setShowSettings(false)}
-          onSaved={(p) => {
-            setMe(p);
-            setShowSettings(false);
-          }}
-          onSignOut={handleSignOut}
-          onToast={notify}
-        />
-      )}
-
       {profileUserId && (
         <ProfileCard
           userId={profileUserId}
@@ -470,7 +455,7 @@ export default function AppPage() {
           onClose={() => setProfileUserId(null)}
           onEditProfile={() => {
             setProfileUserId(null);
-            setShowSettings(true);
+            router.push("/settings");
           }}
           onToast={notify}
         />

@@ -41,6 +41,10 @@ skills-lock.json
 # local design reference screenshots
 /Ref
 
+# playwright / local screenshots
+/.playwright-mcp
+/*.png
+
 # vercel
 .vercel
 
